@@ -1,0 +1,109 @@
+library(WGCNA)
+library(psych)
+library(psychTools)
+library(data.table)
+library(dplyr)
+library(moduleColor)
+library(rstatix)
+library(igraph)
+library(ggplot2)
+options(stringsAsFactors = FALSE)
+
+#Low ZNF768 group
+low_expr <- as.data.frame(multiExpr[[1]]$data) # extract expression data for low group
+
+####Choose the soft-threshold
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+
+# Call the network topology analysis function
+sft_low = pickSoftThreshold(low_expr, powerVector = powers, verbose = 5)
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2))
+cex1 = 0.9
+plot(sft_low$fitIndices[,1], -sign(sft_low$fitIndices[,3])*sft_low$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"))
+text(sft_low$fitIndices[,1], -sign(sft_low$fitIndices[,3])*sft_low$fitIndices[,2],
+     labels=powers,cex=cex1,col="red")
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft_low$fitIndices[,1], sft_low$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft_low$fitIndices[,1], sft_low$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+###Threshold is 8
+
+#Similarity matrix:
+similarity_low <- as.data.frame(cor_mat(low_expr)) 
+rownames(similarity_low) <- similarity_low$rowname
+similar_low <- as.data.frame(similarity_low[,-1]) ##similarity matrix
+similar_low[lower.tri(similar_low,diag = F)] <- NA # lower diagonal part is NA
+
+#p-values
+pval_low <- as.data.frame(cor_get_pval(similarity_low)) 
+rownames(pval_low) <- pval_low$rowname
+p.val_low <- as.data.frame(pval_low[,-1])  ##p val from similarity matrix
+p.val_low[lower.tri(p.val_low,diag = F)] <- NA # lower diagonal part is NA
+
+#Adjusted p values
+p.val_low_adj <- as.data.frame(lapply
+                               (p.val_low, \(x) p.adjust(x, method="fdr", n=length(x)))) ##adjusted p values
+
+rownames(p.val_low_adj) <- rownames(p.val_low)
+
+#Adjacency matrix
+adjacency_low <- similar_low
+for (i in 1:nrow(adjacency_low)) {
+   adjacency_low[i,] <- similar_low[i,]^8 ###adjacency matrix
+}
+
+##FDR 0.05
+set.seed(1)
+###replace not significant results with NAs
+adjacency_low_0.05 <- adjacency_low
+adjacency_low_0.05[p.val_low_adj > .05] <- NA
+adjacency_low0.05 <- as.matrix(adjacency_low_0.05)
+
+sum(is.na(adjacency_low0.05)) ##2068 NAs with loops, 2500 - 2068 - 50 (#of self-loops) = 382 non self-loops
+
+
+##FDR 0.1
+###replace not significant results with NAs
+adjacency_low_0.1 <- adjacency_low
+adjacency_low_0.1[p.val_low_adj > .1] <- NA
+adjacency_low0.1 <- as.matrix(adjacency_low_0.1)
+
+sum(is.na(adjacency_low0.1)) ##2012 NAs with loops, 438 non self-loops
+
+#self-loop and nonself-loop
+loop_low_0.1 <- graph_from_adjacency_matrix(adjacency_low0.1, weighted = TRUE, mode = "undirected")
+non_loop_low_0.1 <- simplify(loop_low_0.1)
+
+##FDR 0.15
+###replace not significant results with NAs
+adjacency_low_0.15 <- adjacency_low
+adjacency_low_0.15[p.val_low_adj > .15] <- NA
+adjacency_low0.15 <- as.matrix(adjacency_low_0.15)
+
+sum(is.na(adjacency_low0.15)) ##1979 NAs with loops, 471 non self-loops
+
+##FDR 0.2
+###replace not significant results with NAs
+adjacency_low_0.2 <- adjacency_low
+adjacency_low_0.2[p.val_low_adj > .2] <- NA
+adjacency_low0.2 <- as.matrix(adjacency_low_0.2)
+
+sum(is.na(adjacency_low0.2)) ##1940 NAs with loops, 510 non self-loops
+
+###plot non self-loops depending on fdr
+fdr_low_nonloop <- data.frame("non self-loops" = c(382, 438, 471, 510), FDR = c("0.05", "0.1", "0.15", "0.2"))
+
+ggplot(data=fdr_low_nonloop, aes(x=FDR, y=non.self.loops)) +
+    geom_bar(stat="identity", fill=brewer.pal(4, "Accent"))+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black",
+                                                                       size = 0.3))
